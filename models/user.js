@@ -1,7 +1,23 @@
 const connection = require('../db-config');
 const Joi = require('joi');
+const argon2 = require('argon2');
 
 const db = connection.promise();
+
+const hashingOptions = {
+  type: argon2.argon2id,
+  memoryCost: 2 ** 16,
+  timeCost: 5,
+  parallelism: 1
+};
+
+const hashPassword = (plainPassword) => {
+  return argon2.hash(plainPassword, hashingOptions);
+};
+
+const verifyPassword = (plainPassword, hashedPassword) => {
+  return argon2.verify(hashedPassword, plainPassword, hashingOptions);
+};
 
 const validate = (data, forCreation = true) => {
   const presence = forCreation ? 'required' : 'optional';
@@ -11,6 +27,7 @@ const validate = (data, forCreation = true) => {
     lastname: Joi.string().max(255).presence(presence),
     city: Joi.string().allow(null, '').max(255),
     language: Joi.string().allow(null, '').max(255),
+    password: Joi.string().min(8).max(255).presence(presence),
   }).validate(data, { abortEarly: false }).error;
 };
 
@@ -43,12 +60,22 @@ const findByEmailWithDifferentId = (email, id) => {
     .then(([results]) => results[0]);
 };
 
-const create = (data) => {
-  return db.query('INSERT INTO users SET ?', data).then(([result]) => {
-    const id = result.insertId;
-    return { ...data, id };
-  });
-};
+// Here is the query that I modified for the quest
+const create = async ({firstname, lastname, city, language, email, password}) => {
+  const hashedPassword = await hashPassword(password);
+  const newUser = await db.query('INSERT INTO users (firstname, lastname, email, city, language, hashedPassword) values (?, ?, ?, ?, ?, ?)',
+    [firstname, lastname, email, city, language, hashedPassword]
+  );
+  const result = {
+    id: newUser.insertId,
+    firstname,
+    lastname,
+    city,
+    language,
+    email,
+  }
+  return result;
+  };
 
 const update = (id, newAttributes) => {
   return db.query('UPDATE users SET ? WHERE id = ?', [newAttributes, id]);
@@ -61,6 +88,8 @@ const destroy = (id) => {
 };
 
 module.exports = {
+  hashPassword,
+  verifyPassword,
   findMany,
   findOne,
   validate,
